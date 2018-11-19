@@ -1,0 +1,135 @@
+######## Get a sample list #########################################################################
+ALL_SAMPLES, = glob_wildcards("{sample}/contigs.fasta")
+
+os.environ["LD_LIBRARY_PATH"] = "/usr/local/MySQL/5.5.41/lib/"
+rule all:
+    input:
+        expand("{sample}.end", sample=ALL_SAMPLES), expand("{sample}.end2", sample=ALL_SAMPLES)
+    threads: 4
+
+rule blastx_vs_CPV:
+    input:
+        r1 = "{sample}/contigs.sub.fasta"
+    output:
+        "{sample}/blastx_vs_CPV.asn"
+    shell:
+    	"""
+	   module load blast
+           blastx -db /data/BUCKLAB/REFS/CVP -query {input.r1} -outfmt 11 -evalue 0.001 -out {output} -num_threads {threads}
+	"""
+
+rule html_out:
+    input:
+    	"{sample}/blastx_vs_CPV.asn"
+    output:
+    	a="{sample}/blastx_vs_CPV.html",
+	b="{sample}/blastx_vs_CPV.tab"
+    shell:
+    	"""
+           module load blast
+	   blast_formatter -archive {input} -html > {output.a}
+	   blast_formatter -archive {input} -outfmt 7 > {output.b}
+	"""
+
+rule make_list:
+    input:
+    	res = "{sample}/blastx_vs_CPV.tab",
+	fa = "{sample}/contigs.sub.fasta"
+    output:
+    	a="{sample}/tmp.list",
+	b="{sample}/tmp_sub.fa",
+	c="{sample}/blastx_vs_CPV.xls"
+    shell:  """
+        module load samtools
+	      csh /data/BUCKLAB/SCRIPTS/grep1.csh {input.res} {output.a}
+	      csh /data/BUCKLAB/SCRIPTS/fetch.csh {output.a} {input.fa} {output.b}
+	      csh /data/BUCKLAB/SCRIPTS/grep2.csh {input.res} {output.c}
+	    """
+
+rule blastn_vs_nt:
+    input:
+    	"{sample}/tmp_sub.fa"
+    output:
+    	"{sample}/blastn_vs_nt_sub.asn2"
+    shell:  """
+               module load blast
+	       blastn -task blastn -db /fdb/blastdb/nt -query {input} -outfmt 11 -evalue 0.001 -out {output} -num_threads {threads}  -max_target_seqs 5
+	    """
+
+rule html2_out:
+    input:
+    	a="{sample}/blastn_vs_nt_sub.asn2",
+    	m="{sample}/meta_data.tab"
+    output:
+    	a="{sample}/blastn_vs_nt_sub.html",
+	b="{sample}/blastn_vs_nt_sub.tab",
+	c="{sample}/blastn_vs_nt_sub5.xls",
+	d="{sample}/blastn_vs_nt_sub1.xls",
+	e="{sample}/blastn_vs_nt_sub.krona",
+	f="{sample}/blastn_vs_nt_sub.krona.html",
+        g="{sample}.end"
+
+    shell:  """
+    		module load blast
+        module load kronatools
+		blast_formatter -archive {input.a} -html > {output.a}
+		blast_formatter -archive {input.a} -outfmt "6 staxids std stitle "  > {output.b}
+		sh /data/starrettgj/scripts/RCAcontigSnakemake/alookup.sh {output.b} {input.m}  >{output.c}
+		sh /data/starrettgj/scripts/RCAcontigSnakemake/alookup.sh {output.b} {input.m} -m  >{output.d}
+		grep -v "#" {output.d} | awk -F"\t" -v OFS="\t" '{{print $5,$17,$3}}'  >{output.e}
+		ktImportTaxonomy {output.e} -m 3 -o {output.f}
+                touch {output.g}
+	    """
+
+rule blastzall_vs_nt:
+    input:
+        r1 = "{sample}/contigs.sub.fasta",
+#	x = "{sample}.end"
+    output:
+        "{sample}/blastall_vs_nt.asn3"
+    shell:
+        """
+	   module load blast
+	   blastn -task megablast -db /fdb/blastdb/nt -query {input.r1} -outfmt 11 -evalue 0.0001 -out {output} -num_threads {threads} -max_target_seqs 5
+	"""
+
+
+rule html3_out:
+    input:
+    	a="{sample}/blastall_vs_nt.asn3",
+    	m="{sample}/meta_data.tab"
+    output:
+    	a="{sample}/blastall_vs_nt_nt.html",
+	b="{sample}/blastall_vs_nt_nt.tab",
+	c="{sample}/blastall_vs_nt_nt5.xls",
+	d="{sample}/blastall_vs_nt_nt1.xls",
+	e="{sample}/blastall_vs_nt_nt.krona",
+	f="{sample}/blastall_vs_nt_nt.krona.html",
+	g="{sample}.end2"
+    shell:  """
+    		module load blast
+        module load kronatools
+		blast_formatter -archive {input.a} -html > {output.a}
+		blast_formatter -archive {input.a} -outfmt "6 staxids std stitle " -max_target_seqs 1 > {output.b}
+		sh /data/starrettgj/scripts/RCAcontigSnakemake/alookup.sh {output.b} {input.m}  >{output.c}
+		sh /data/starrettgj/scripts/RCAcontigSnakemake/alookup.sh {output.b} {input.m} -m  >{output.d}
+		grep -v "#" {output.d} | awk -F"\t" -v OFS="\t" '{{print $5,$17,$3}}'  >{output.e}
+		ktImportTaxonomy {output.e} -m 3 -o {output.f}
+		touch {output.g}
+	    """
+
+
+rule get_coverage:
+    priority: 50
+    input:
+        "{sample}/contigs.fasta"
+    output:
+        sub="{sample}/contigs.sub.fasta",
+        m="{sample}/meta_data.tab"
+    shell:
+        """
+        module load bioawk
+        bioawk -c fastx '{{if(length($seq)>500) print ">" $name "\\n" $seq}}' {input} > {output.sub}
+        echo "Name\tConsensus length\tTotal read count\tAverage coverage" > {output.m}
+        bioawk -c fastx 'BEGIN{{OFS="\\t"}};{{split($name, a, "_"); print $name, a[4], int((a[4]*a[6])/150), a[6]}}' {output.sub} >> {output.m}
+        """

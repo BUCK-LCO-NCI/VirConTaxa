@@ -1,0 +1,116 @@
+######## Get a sample list #########################################################################
+ALL_SAMPLES, = glob_wildcards("input/{sample}.fa")
+
+os.environ["LD_LIBRARY_PATH"] = "/usr/local/MySQL/5.5.41/lib/"
+rule all:
+    input:
+        expand("{sample}.end", sample=ALL_SAMPLES), expand("{sample}.end2", sample=ALL_SAMPLES)
+
+rule blastx_vs_CPV:
+    input:
+        r1 = "input/{sample}.fa"
+    output:
+        "blastx_vs_CPV/{sample}.asn"
+    shell:
+    	"""
+	   module load blast
+           blastx -db /data/BUCKLAB/REFS/CVP -query {input.r1} -outfmt 11 -evalue 0.001 -out {output}
+	"""
+
+rule html_out:
+    input:  
+    	"blastx_vs_CPV/{sample}.asn"
+    output:  
+    	a="blastx_vs_CPV/{sample}.html",
+	b="blastx_vs_CPV/{sample}.tab"
+    shell:  
+    	"""
+           module load blast
+	   blast_formatter -archive {input} -html > {output.a}
+	   blast_formatter -archive {input} -outfmt 7 > {output.b}
+	"""
+
+rule make_list:
+    input:  
+    	res = "blastx_vs_CPV/{sample}.tab",
+	fa = "input/{sample}.fa"
+    output:  
+    	a="tmp/{sample}.list",
+	b="tmp/{sample}_sub.fa",
+	c="blastx_vs_CPV/{sample}.xls"
+    shell:  """
+	      /data/BUCKLAB/SCRIPTS/grep1.csh {input.res} {output.a}
+	      /data/BUCKLAB/SCRIPTS/fetch.csh {output.a} {input.fa} {output.b}
+	      /data/BUCKLAB/SCRIPTS/grep2.csh {input.res} {output.c}	      
+	    """
+
+rule blastn_vs_nt:
+    input:  
+    	"tmp/{sample}_sub.fa"
+    output:  
+    	"blastn_vs_nt/{sample}_sub.asn2"
+    shell:  """
+               module load blast
+	       blastn -task blastn -db /fdb/blastdb/nt -query {input} -outfmt 11 -evalue 0.001 -out {output} -num_threads 4  -max_target_seqs 5
+	    """
+
+rule html2_out:
+    input:  
+    	"blastn_vs_nt/{sample}_sub.asn2"
+    output:  
+    	a="blastn_vs_nt/{sample}_sub.html",
+	b="blastn_vs_nt/{sample}_sub.tab",
+	c="blastn_vs_nt/{sample}_sub5.xls",
+	d="blastn_vs_nt/{sample}_sub1.xls",
+	e="blastn_vs_nt/{sample}_sub.krona",	
+	f="blastn_vs_nt/{sample}_sub.krona.html",		
+        g="{sample}.end"
+    params:
+    	m="meta_data/{sample}.tab"
+    shell:  """
+    		module load blast
+		blast_formatter -archive {input} -html > {output.a}
+		blast_formatter -archive {input} -outfmt "6 staxids std stitle "  > {output.b}
+		/data/BUCKLAB/SCRIPTS/alookup.sh {output.b} {params.m}  >{output.c}
+		/data/BUCKLAB/SCRIPTS/alookup.sh {output.b} {params.m} -m  >{output.d}
+		grep -v "#" {output.d} | awk -F"\t" -v OFS="\t" '{{print $5,$17,$3}}'  >{output.e}
+		/data/OSTR/pcf/VH_pipeline/SCRIPTS/KronaTools-2.7/bin/ktImportTaxonomy {output.e} -m 3 -o {output.f}
+                touch {output.g}
+	    """
+
+rule blastzall_vs_nt:
+    input:
+        r1 = "input/{sample}.fa",
+#	x = "{sample}.end"
+    output:
+        "blastall_vs_nt/{sample}.asn3"
+    shell:
+        """
+	   module load blast
+	   blastn -task megablast -db /fdb/blastdb/nt -query {input.r1} -outfmt 11 -evalue 0.0001 -out {output} -num_threads 4  -max_target_seqs 5
+	"""
+	
+	
+rule html3_out:
+    input:  
+    	"blastall_vs_nt/{sample}.asn3"
+    output:  
+    	a="blastall_vs_nt/{sample}_nt.html",
+	b="blastall_vs_nt/{sample}_nt.tab",
+	c="blastall_vs_nt/{sample}_nt5.xls",
+	d="blastall_vs_nt/{sample}_nt1.xls",
+	e="blastall_vs_nt/{sample}_nt.krona",	
+	f="blastall_vs_nt/{sample}_nt.krona.html",	
+	g="{sample}.end2"
+    params:
+    	m="meta_data/{sample}.tab"	
+    shell:  """
+    		module load blast
+		blast_formatter -archive {input} -html > {output.a}
+		blast_formatter -archive {input} -outfmt "6 staxids std stitle " -max_target_seqs 1 > {output.b}
+		/data/BUCKLAB/SCRIPTS/alookup.sh {output.b} {params.m}  >{output.c}
+		/data/BUCKLAB/SCRIPTS/alookup.sh {output.b} {params.m} -m  >{output.d}
+		grep -v "#" {output.d} | awk -F"\t" -v OFS="\t" '{{print $5,$17,$3}}'  >{output.e}
+		/data/OSTR/pcf/VH_pipeline/SCRIPTS/KronaTools-2.7/bin/ktImportTaxonomy {output.e} -m 3 -o {output.f}		
+		touch {output.g}
+	    """
